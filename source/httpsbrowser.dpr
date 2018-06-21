@@ -2,6 +2,8 @@ library httpsbrowser;
 
 {$DEFINE NOFORMS}
 
+{$R 'httpsbrowser.res' '..\res\httpsbrowser.rc'}
+
 uses
   System.SysUtils,
   Vcl.Dialogs,
