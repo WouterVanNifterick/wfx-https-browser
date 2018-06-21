@@ -24,8 +24,7 @@ uses
 {$E wfx64}
 {$ENDIF}
 {$ENDIF}
-{$R hbrowser.res}
-{$R httpbrowser.res}
+{$R httpsbrowser.res}
 
 type
   TPlugin = class
