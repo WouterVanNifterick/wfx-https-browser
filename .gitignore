@@ -67,3 +67,4 @@ __recovery/
 *.wfx
 *.wfx64
 bin/
+test/Win32/Debug/dunitx-results.xml
