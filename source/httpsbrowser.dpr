@@ -28,86 +28,62 @@ uses
 {$R httpbrowser.res}
 
 type
-  TProgress = class(TObject)
+  TPlugin = class
+    HttpCli: THTTPClient;
+    HttpRes: IHTTPResponse;
+
+    PreviousPath: string;
+    CurrentPath : string;
+    FLIndex     : Integer;
+    PathExe     : string;
+
     LocalFile: string;
     RemoteFile: string;
-    tmr: TTimer;
+
+    Received         : Int64;
+    FileDate         : _FILETIME;
+    links            : string;
+    FileList         : TStringList;
+
+    GetSizeExtensions: string;
+    BookMark         : TBookMark;
+    History          : THistory;
+    LastPage         : string;
+    // IsGettingFile    : Boolean;
+    AbortCopy       : Boolean;
+    GetFileNow      : string;
+    Parsed          : Boolean;
+    OriginalLastPage: string;
     constructor Create;
-    destructor Destroy; override;
-    procedure UpdateProgressBar(Sender: TObject);
-    procedure HeaderEnd(Sender: TObject);
+    destructor Destroy;override;
+    procedure Init;
+    function GetFileSize(url: string): Integer;
+    function GetPage(var url: string): string;
+    procedure GetBinaryFile(const url, FileName: string);
+    procedure ParsePage(var sl: TStringList; url: string);
+    procedure BuildFindData(var FD: TWin32FindData; FileName: string);
+    procedure PageList(var sl: TStringList);
+    procedure RootList(var sl: TStringList);
+    procedure LangList(var sl: TStringList);
+    procedure CreateFileList;
   end;
 
 var
-  PreviousPath: string;
-  CurrentPath : string;
-  FLIndex     : Integer;
-  PathExe     : string;
-
-  HttpCli: THTTPClient;
-  HttpRes: IHTTPResponse;
-
-  Received         : Int64;
-  FileDate         : _FILETIME;
-  links            : string;
-  FileList         : TStringList;
-  ProgressObject   : TProgress;
-  GetSizeExtensions: string;
-  BookMark         : TBookMark;
-  History          : THistory;
-  LastPage         : string;
-  // IsGettingFile    : Boolean;
-  AbortCopy       : Boolean;
-  GetFileNow      : string;
-  Parsed          : Boolean;
-  OriginalLastPage: string;
+  Plugin: TPlugin;
 
   { TProgress }
 
-constructor TProgress.Create;
-begin
-  inherited Create;
-  tmr          := TTimer.Create(nil);
-  tmr.Enabled  := False;
-  tmr.OnTimer  := UpdateProgressBar;
-  tmr.Interval := 200;
-end;
-
-destructor TProgress.Destroy;
-begin
-  FreeAndNil(tmr);
-  inherited;
-end;
-
-procedure TProgress.HeaderEnd(Sender: TObject);
-begin
-  tmr.Enabled := True;
-end;
-
-procedure TProgress.UpdateProgressBar(Sender: TObject);
+function DateTimeToFileTime(MyDateTime: TDateTime): TFileTime;
 var
-  i: Integer;
+  MyFileAge      : Integer;
+  MyLocalFileTime: _FILETIME;
 begin
-  if AbortCopy then
-    Exit;
-
-  i := HttpRes.ContentLength;
-
-  // Received := HttpCli.OnReceiveData( . .. RcvdCount;
-  if (i > 0) and (i > Received) then
-    i := Trunc(100 * Received / i)
-  else
-    i := 100;
-
-  if ProgressBar(PluginNumber, pChar(RemoteFile), pChar(LocalFile), i) = 1 then
-  begin
-    AbortCopy := True;
-    // @@@    HttpCli.Abort;
-  end;
+  MyFileAge := DateTimeToFileDate(MyDateTime);
+  DosDateTimeToFileTime(LongRec(MyFileAge).Hi, LongRec(MyFileAge).Lo, MyLocalFileTime);
+  LocalFileTimeToFileTime(MyLocalFileTime, Result);
 end;
 
-// ______________________________________________________________________________
-function GetFileSize(url: string): Integer;
+function TPlugin.GetFileSize(url: string): Integer;
 begin
   try
     Result := HttpCli.Head(url).ContentLength;
@@ -116,8 +92,7 @@ begin
   end;
 end;
 
-// ______________________________________________________________________________
-function GetPage(var url: string): string;
+function TPlugin.GetPage(var url: string): string;
 var res:IHTTPResponse;
 begin
   res := HttpCli.Get(url);
@@ -125,11 +100,16 @@ begin
     Result := res.ContentAsString(TEncoding.ASCII)
   else
     Result := '';
-  ProgressBar(PluginNumber, PChar(ProgressObject.RemoteFile), PChar(ProgressObject.LocalFile), 100);
-  ProgressObject.tmr.Enabled := False;
+  ProgressBar(PluginNumber, PChar(RemoteFile), PChar(LocalFile), 100);
 end;
 
-// ______________________________________________________________________________
+procedure TPlugin.Init;
+begin
+  PreviousPath := '';
+  FileDate     := DateTimeToFileTime(Now);
+  GetFileNow   := '';
+end;
+
 procedure SplitURL(url: string; out domain, folders, page: string);
 var
   s   : string;
@@ -141,62 +121,70 @@ begin
   page    := '';
   s       := '';
   i       := Pos('//', url);
-  if i > 0 then begin
+  if i > 0 then
+  begin
     prot := Copy(url, 1, i + 1);
     Delete(url, 1, i + 1);
   end;
   i := Pos('/', url);
-  if i = 0 then begin
+  if i = 0 then
+  begin
     domain := prot + TrimSlashes(url);
     Exit;
   end;
   domain := prot + TrimSlashes(Copy(url, 1, i - 1));
   Delete(url, 1, i);
   i := Pos('/', url);
-  while i > 0 do begin
+  while i > 0 do
+  begin
     s := s + Copy(url, 1, i);
     Delete(url, 1, i);
     i := Pos('/', url);
   end;
   folders := s;
-  if Pos('.', url) > 0 then page := TrimSlashes(url)
-  else folders := folders + url;
+  if Pos('.', url) > 0 then
+    page := TrimSlashes(url)
+  else
+    folders := folders + url;
   folders   := TrimSlashes(folders);
 end;
-// ______________________________________________________________________________
-function GetURLRoot(URL : string) : string;
+
+function GetURLRoot(url: string): string;
 var
   d, f, p: string;
 begin
-  Result := DeleteUntilLast(URL, '\');
+  Result := DeleteUntilLast(url, '\');
   SplitURL(Result, d, f, p);
   Result := d + '/' + f;
 end;
-// ______________________________________________________________________________
-function CompletePath(RemoteName: PChar): string;
+
+function CompletePath(CurrentPath, RemoteName: string): string;
 var
   root   : string;
   d, f, p: string;
 begin
-  Result := StrPas(RemoteName);
+  Result := RemoteName;
   Result := DeleteUntilLast(Result, '\');
-  if Pos('//', Result) = 0 then begin
+  if Pos('//', Result) = 0 then
+  begin
     root := GetURLRoot(CurrentPath);
-    if Result[1] = '/' then begin
-      SplitURL(Root, d, f, p);
-      Root := d;
+    if Result[1] = '/' then
+    begin
+      SplitURL(root, d, f, p);
+      root := d;
     end;
     if (root <> '') and (root[Length(root)] = '/') then
       Result := root + TrimSlashes(Result)
-    else Result := root + '/' + TrimSlashes(Result);
+    else
+      Result := root + '/' + TrimSlashes(Result);
   end;
 end;
-// ______________________________________________________________________________
+
 function OnlyFileName(const RemoteName: string): string;
 begin
   Result := DeleteUntilLast(RemoteName, '\');
 end;
-// ______________________________________________________________________________
+
 function FilterFileName(FileName: string): string;
 var
   i: Integer;
@@ -207,9 +195,10 @@ begin
   Result := DeleteUntilLast(Result, '\');
 
   i := Pos('?', Result);
-  if i > 0 then Delete(Result, i, Length(Result));
+  if i > 0 then
+    Delete(Result, i, Length(Result));
 end;
-// ______________________________________________________________________________
+
 function CreateFileName(Path: string): string;
 var
   d, f, p: string;
@@ -237,8 +226,7 @@ begin
   Result := Replace(Result, '?', '_');
 end;
 
-// ______________________________________________________________________________
-function IsWebPage(url: string): Boolean;
+function IsWebPage(url,links: string): Boolean;
 var
   i      : Integer;
   d, f, p: string;
@@ -262,8 +250,7 @@ begin
   Result := (p = '') or (Pos(' ' + LowerCase(Ext) + ' ', links) > 0);
 end;
 
-// ______________________________________________________________________________
-procedure GetBinaryFile(const url, FileName: string);
+procedure TPlugin.GetBinaryFile(const url, FileName: string);
 var
   fs : TFileStream;
 begin
@@ -274,20 +261,9 @@ begin
   finally
     fs.Free;
   end;
-  ProgressBar(PluginNumber, PChar(ProgressObject.RemoteFile), PChar(ProgressObject.LocalFile), 100);
+  ProgressBar(PluginNumber, PChar(RemoteFile), PChar(LocalFile), 100);
 end;
 
-// ______________________________________________________________________________
-function DateTimeToFileTime(MyDateTime: TDateTime): TFileTime;
-var
-  MyFileAge      : Integer;
-  MyLocalFileTime: _FILETIME;
-begin
-  MyFileAge := DateTimeToFileDate(MyDateTime);
-  DosDateTimeToFileTime(LongRec(MyFileAge).Hi, LongRec(MyFileAge).Lo, MyLocalFileTime);
-  LocalFileTimeToFileTime(MyLocalFileTime, Result);
-end;
-// ______________________________________________________________________________
 function GetFirstString(var Text, LText: string; key: string; var ResultStr: string): Boolean;
 var
   c   : Char;
@@ -297,23 +273,23 @@ var
   Code: Integer;
 begin
   ResultStr := '';
-  // Key := ' ' + Key;
 
-  i := Pos(Key, LText);
-  if i = 0 then begin
+  i := Pos(key, LText);
+  if i = 0 then
+  begin
     Result := False;
     Exit;
   end;
 
   Result := True;
-  Inc(i, Length(Key) - 1);
+  Inc(i, Length(key) - 1);
   Delete(Text, 1, i);
   Delete(LText, 1, i);
 
   l := Length(Text);
   i := 1;
 
-  // Suppression des espaces avant et après "="
+  // suppress spaces before and after "="
   while (i < l) and (Text[i] = ' ') do
     Inc(i);
   if (i >= l) or (Text[i] <> '=') then
@@ -329,7 +305,8 @@ begin
     Code := 1
   else
     Code := 0;
-  c      := Text[i + Code];
+
+  c := Text[i + Code];
 
   // mot simple sans guillemets
   if not CharInSet(c, ['"', '''']) then
@@ -363,7 +340,6 @@ begin
   ResultStr := Replace(ResultStr, #13, '');
   ResultStr := Replace(ResultStr, #10, '');
 end;
-// ______________________________________________________________________________
 
 function FsInit(PluginNr: Integer; pProgressProc: TProgressProc; pLogProc: TLogProc; pRequestProc: TRequestProc): Integer; stdcall;
 begin
@@ -377,12 +353,11 @@ begin
   ProgressBar  := pProgressProcW;
   LogProc      := pLogProcW;
   Result       := 0;
-  PreviousPath := '';
-  FileDate     := DateTimeToFileTime(Now);
-  GetFileNow   := '';
+  Plugin.Init;
+
 end;
 
-// ______________________________________________________________________________
+
 function MakeRelative(CompleteText, root: string): string;
 begin
   if Pos(LowerCase(root), LowerCase(CompleteText)) = 1 then
@@ -391,20 +366,27 @@ begin
     Result := CompleteText;
 end;
 
-// ______________________________________________________________________________
+
 function CheckValue(line: string): Boolean;
 var
   ll: string;
 begin
-  Result := False;
   if line = '' then
-    Exit;
+    Exit(False);
+
   ll     := LowerCase(line);
-  Result := (ll <> '/') and (Pos('mailto', ll) <> 1) and (Pos('javascript', ll) <> 1) and (Pos('+', ll) = 0) and (Pos('"', ll) = 0) and (Pos('\', ll) = 0) and (Pos('''', ll) = 0) and (Pos('#', ll) <> 1);
+  Result := (ll <> '/')
+        and (Pos('mailto', ll) <> 1)
+        and (Pos('javascript', ll) <> 1)
+        and (Pos('+', ll) = 0)
+        and (Pos('"', ll) = 0)
+        and (Pos('\', ll) = 0)
+        and (Pos('''', ll) = 0)
+        and (Pos('#', ll) <> 1);
 end;
 
-// ______________________________________________________________________________
-procedure ParsePage(var sl: TStringList; url: string);
+
+procedure TPlugin.ParsePage(var sl: TStringList; url: string);
 var
   page : string;
   LPage: string;
@@ -412,9 +394,9 @@ var
   ls   : string;
   l    : string;
 begin
-  ProgressObject.RemoteFile := PChar(url);
-  ProgressObject.LocalFile  := PChar(Strings[1]);
-  // Page := GetPage(URL);
+  RemoteFile := url;
+  LocalFile  := Strings[1];
+
   page  := LastPage;
   LPage := LowerCase(page);
 
@@ -422,7 +404,7 @@ begin
     Exit;
   s  := page;
   ls := LPage;
-  // while GetFirstString(s, ls, ' href=', '"', '"', l) do
+
   while GetFirstString(s, ls, 'href', l) do
   begin
     if CheckValue(l) then
@@ -437,8 +419,8 @@ begin
       sl.Add(l);
 end;
 
-// ______________________________________________________________________________
-procedure BuildFindData(var FD: TWin32FindData; FileName: string);
+
+procedure TPlugin.BuildFindData(var FD: TWin32FindData; FileName: string);
 var
   Ext: string;
   s  : string;
@@ -463,8 +445,7 @@ begin
   end;
 end;
 
-// ______________________________________________________________________________
-procedure PageList(var sl: TStringList);
+procedure TPlugin.PageList(var sl: TStringList);
 begin
   sl.Add('...');
   sl.Add(Strings[2]);
@@ -472,16 +453,14 @@ begin
   ParsePage(sl, CurrentPath);
 end;
 
-// ______________________________________________________________________________
-procedure RootList(var sl: TStringList);
+procedure TPlugin.RootList(var sl: TStringList);
 begin
   sl.Add(Strings[0]); // Connect
   sl.Add(Strings[6]); // Choose Language
   sl.AddStrings(BookMark.BMList);
 end;
 
-// ______________________________________________________________________________
-procedure LangList(var sl: TStringList);
+procedure TPlugin.LangList(var sl: TStringList);
 var
   sr: TSearchRec;
 begin
@@ -493,8 +472,30 @@ begin
   end;
 end;
 
-// ______________________________________________________________________________
-procedure CreateFileList;
+constructor TPlugin.Create;
+begin
+  inherited;
+  HttpCli             := THTTPClient.Create;
+  FileList            := TStringList.Create;
+  FileList.Sorted     := True;
+  FileList.Duplicates := dupIgnore;
+  PathExe             := ExtractFilePath(GetDllPathName);
+  ini                 := TIni.Create(PathExe + 'httpbrowser.ini');
+  Strings             := TLines.Create;
+  Strings.SetLanguage(PathExe + ini.GetS('Language') + '.lng');
+  GetSizeExtensions := ' ' + LowerCase(ini.GetS('GetSizeExtensions', '')) + ' ';
+  links             := LowerCase(' ' + ini.GetS('LinksExtensions', '.php .htm .html .shtm .shtml .php3 .php4 .php5 .cfm .asp .jsp .swf .jhtm .jhtml .phtml .phtm .chtml .chtml .adp .dml .xml .xhtml .xhtm .xiti') + ' ');
+  BookMark          := TBookMark.Create;
+  History           := THistory.Create;
+  // HttpReq.ProxySettings.Host := ini.GetS('Proxy');
+  // HttpCli.ProxySettings.Port := ini.GetS('ProxyPort', '80');
+  // HttpCli.ProxySettings.UserName := ini.GetS('ProxyLogin');
+  // HttpCli.ProxySettings.Password := ini.GetS('ProxyPassword');
+  // HttpCli.OnHeaderEnd   := ProgressObject.HeaderEnd;
+
+end;
+
+procedure TPlugin.CreateFileList;
 begin
   FileList.Clear;
   if CurrentPath = '\' then
@@ -505,17 +506,27 @@ begin
     PageList(FileList);
 end;
 
-function IsRoot(var Name: string; const RemoteName: string): Boolean;
+destructor TPlugin.Destroy;
+begin
+  FreeAndNil(FileList);
+  FreeAndNil(ini);
+  FreeAndNil(HttpCli);
+  FreeAndNil(BookMark);
+  FreeAndNil(Strings);
+  FreeAndNil(History);
+  inherited;
+end;
+
+function IsRoot(var Name: string; const RemoteName: string; const links:string): Boolean;
 begin
   Result := Copy(RemoteName, 2, Length(RemoteName)) = Copy(Name, 2, Length(Name));
   if Result then
   begin
     Name   := Copy(Name, 2, Length(Name));
-    Result := IsWebPage(Name)
+    Result := IsWebPage(Name, Links)
   end;
 end;
 
-// ______________________________________________________________________________
 function FsExecuteFile(MainWin: THandle; RemoteName, Verb: PAnsiChar): Integer; stdcall;
 begin
   Result := FS_EXEC_ERROR
@@ -546,11 +557,11 @@ begin
     i := Pos('\...', Name);
     if (i > 0) and (i = Length(Name) - 3) then
     begin
-      s := History.GoBack;
+      s := Plugin.History.GoBack;
       StrPCopy(RemoteName, s);
       Delete(s, 1, 1);
-      LastPage := GetPage(s);
-      Parsed   := True;
+      Plugin.LastPage := Plugin.GetPage(s);
+      Plugin.Parsed   := True;
       Exit;
     end;
 
@@ -558,22 +569,22 @@ begin
 
     if (Name = Strings[0]) then
     begin // Connect
-      FileList.Clear;
+      Plugin.FileList.Clear;
       s := ini.GetS('LastURL', 'http://www.google.com');
       if Input('', '', s, RT_URL) then
       begin
         ini.SetValue('LastURL', s);
-        if not IsWebPage(s) then
+        if not IsWebPage(s,Plugin.links) then
         begin
-          GetFileNow := s;
+          Plugin.GetFileNow := s;
           StrPCopy(RemoteName, '\');
           Exit;
         end;
-        History.Add(s);
-        LastPage := GetPage(s);
-        Parsed   := True;
+        Plugin.History.Add(s);
+        Plugin.LastPage := Plugin.GetPage(s);
+        Plugin.Parsed   := True;
         StrPCopy(RemoteName, '\' + s);
-        CurrentPath := RemoteName;
+        Plugin.CurrentPath := RemoteName;
       end
       else
         StrPCopy(RemoteName, '\');
@@ -581,10 +592,10 @@ begin
     else if Name <> '' then
     begin // Autres que connect
       ofn  := OnlyFileName(RemoteName);
-      Name := CompletePath(RemoteName);
+      Name := CompletePath(Plugin.CurrentPath, RemoteName);
       if ofn = Strings[2] then
       begin // Bookmark
-        BookMark.Add(CurrentPath);
+        Plugin.BookMark.Add(Plugin.CurrentPath);
         Result := FS_EXEC_OK;
       end
       else if ofn = Strings[6] then
@@ -592,16 +603,16 @@ begin
       else if RemoteName = '\' + Strings[6] + '\' + ofn then
       begin // language 2
         ini.SetValue('Language', ofn);
-        Strings.SetLanguage(PathExe + ofn + '.lng');
+        Strings.SetLanguage(Plugin.PathExe + ofn + '.lng');
         StrPCopy(RemoteName, '\');
       end
       else
       begin
-        if IsWebPage(Name) or IsRoot(Name, RemoteName) then
+        if IsWebPage(Name, Plugin.Links) or IsRoot(Name, RemoteName, Plugin.Links) then
         begin // Webpage
-          History.Add(Name);
-          LastPage := GetPage(Name);
-          Parsed   := True;
+          Plugin.History.Add(Name);
+          Plugin.LastPage := Plugin.GetPage(Name);
+          Plugin.Parsed   := True;
           StrPCopy(RemoteName, '\' + Name);
         end
         else
@@ -619,7 +630,6 @@ begin
   end;
 end;
 
-// ______________________________________________________________________________
 function FsFindFirst(Path: PAnsiChar; var FindData: TWin32FindData): THandle; stdcall;
 begin
   Result := 0;
@@ -630,40 +640,39 @@ var
   ofn: string;
 begin
   FillChar(FindData, SizeOf(FindData), 0);
-  CurrentPath := Path;
+  Plugin.CurrentPath := Path;
 
-  if not Parsed then
+  if not Plugin.Parsed then
   begin
     FsExecuteFileW(0, Path, PChar(''));
   end;
-  Parsed := False;
-  CreateFileList;
-  if FileList.Count = 0 then
+  Plugin.Parsed := False;
+  Plugin.CreateFileList;
+  if Plugin.FileList.Count = 0 then
     Result := INVALID_HANDLE_VALUE
   else
   begin
     Result  := 0;
-    FLIndex := 0;
-    BuildFindData(FindData, FileList[0]);
+    Plugin.FLIndex := 0;
+    Plugin.BuildFindData(FindData, Plugin.FileList[0]);
   end;
 
-  if GetFileNow <> '' then
+  if Plugin.GetFileNow <> '' then
   begin
     try
-      ofn                       := PathExe + CreateFileName(GetFileNow);
-      ProgressObject.RemoteFile := PChar(GetFileNow);
-      ProgressObject.LocalFile  := PChar(ofn);
-      GetBinaryFile(GetFileNow, ofn);
-      if not AbortCopy then
+      ofn                       := Plugin.PathExe + CreateFileName(Plugin.GetFileNow);
+      Plugin.RemoteFile := Plugin.GetFileNow;
+      Plugin.LocalFile  := ofn;
+      Plugin.GetBinaryFile(Plugin.GetFileNow, ofn);
+      if not Plugin.AbortCopy then
         ShellExecute(HInstance, 'Open', PChar(ofn), PChar(''), PChar(''), SW_SHOWNORMAL);
-      AbortCopy := False;
+      Plugin.AbortCopy := False;
     finally
-      GetFileNow := '';
+      Plugin.GetFileNow := '';
     end;
   end;
 end;
 
-// ______________________________________________________________________________
 function FsFindNext(Hdl: THandle; var FindData: TWin32FindData): bool; stdcall;
 begin
   Result := False;
@@ -672,19 +681,17 @@ end;
 function FsFindNextW(Hdl: THandle; var FindDataW: tWIN32FINDDATAW): bool; stdcall;
 begin
   FillChar(FindDataW, SizeOf(FindDataW), 0);
-  Inc(FLIndex);
-  Result := FileList.Count > FLIndex;
+  Inc(Plugin.FLIndex);
+  Result := Plugin.FileList.Count > Plugin.FLIndex;
   if Result then
-    BuildFindData(FindDataW, FileList[FLIndex]);
+    Plugin.BuildFindData(FindDataW, Plugin.FileList[Plugin.FLIndex]);
 end;
 
-// ______________________________________________________________________________
 function FsFindClose(Hdl: THandle): Integer; stdcall;
 begin
   Result := 0;
 end;
 
-// ______________________________________________________________________________
 function FsDeleteFile(RemoteName: PAnsiChar): bool; stdcall;
 begin
   Result := False;
@@ -695,16 +702,15 @@ var
   s: string;
 begin
   Result := False;
-  if CurrentPath <> '\' then
+  if Plugin.CurrentPath <> '\' then
     Exit;
   Result := True;
   s      := RemoteName;
   if s <> '' then
     Delete(s, 1, 1);
-  BookMark.Delete(s);
+  Plugin.BookMark.Delete(s);
 end;
 
-// ______________________________________________________________________________
 function FsGetFile(RemoteName, LocalName: PAnsiChar; CopyFlags: Integer; RemoteInfo: pRemoteInfo): Integer; stdcall;
 begin
   Result := FS_FILE_OK;
@@ -722,17 +728,17 @@ begin
   try
     Name := LocalName;
 
-    // calcule le path local
+    // calcule local path
     RemoteFileName := OnlyFileName(RemoteName);
     LocalPath      := Name;
     i              := Length(Name);
     if RemoteFileName = '...' then
     begin
       Delete(LocalPath, i - 2, 3);
-      StrPCopy(LocalName, IncludeTrailingPathDelimiter(LocalPath) + CreateFileName(CurrentPath));
-      StrPCopy(RemoteName, '\' + CurrentPath);
+      StrPCopy(LocalName, IncludeTrailingPathDelimiter(LocalPath) + CreateFileName(Plugin.CurrentPath));
+      StrPCopy(RemoteName, '\' + Plugin.CurrentPath);
 
-      sStream := TStringStream.Create(OriginalLastPage);
+      sStream := TStringStream.Create(Plugin.OriginalLastPage);
       try
         sStream.SaveToFile(LocalName);
       finally
@@ -757,23 +763,23 @@ begin
     end;
     // fin path local
 
-    url := CompletePath(RemoteName);
+    url := CompletePath(Plugin.CurrentPath, RemoteName);
     // Name := LocalPath + '\' + CreateFileName(url);
     Name := IncludeTrailingPathDelimiter(LocalPath) + CreateFileName(url);
 
     StrPCopy(LocalName, Name);
     StrPCopy(RemoteName, url);
 
-    if (CurrentPath = '\') or (CurrentPath = '\' + Strings[6]) then
+    if (Plugin.CurrentPath = '\') or (Plugin.CurrentPath = '\' + Strings[6]) then
     begin
       Result := FS_FILE_NOTSUPPORTED
     end
     else
     begin
-      ProgressObject.RemoteFile := RemoteName;
-      ProgressObject.LocalFile  := LocalName;
-      if not AbortCopy then
-        GetBinaryFile(url, PChar(Name));
+      Plugin.RemoteFile := RemoteName;
+      Plugin.LocalFile  := LocalName;
+      if not Plugin.AbortCopy then
+        Plugin.GetBinaryFile(url, PChar(Name));
       Result := FS_FILE_OK;
     end;
   except
@@ -785,13 +791,13 @@ begin
   end;
 end;
 
-// ______________________________________________________________________________
+
 procedure FsGetDefRootName(DefRootName: PAnsiChar; MaxLen: Integer); stdcall;
 begin
-  System.Ansistrings.StrLCopy(DefRootName, 'HTTP Browser', MaxLen - 1);
+  System.Ansistrings.StrLCopy(DefRootName, 'HTTPS Browser', MaxLen - 1);
 end;
 
-// ______________________________________________________________________________
+
 procedure FsStatusInfo(RemoteDir: PAnsiChar; InfoStartEnd, InfoOperation: Integer); stdcall;
 begin
 end;
@@ -799,11 +805,10 @@ end;
 procedure FsStatusInfoW(RemoteDir: PWideChar; InfoStartEnd, InfoOperation: Integer); stdcall;
 begin
   if (InfoStartEnd = FS_STATUS_END) and (InfoOperation = FS_STATUS_OP_GET_MULTI) then
-    AbortCopy := False;
+    Plugin.AbortCopy := False;
   // ShowMessageFmt('info op = %d', [InfoOperation]);
 end;
 
-// ______________________________________________________________________________
 function FsExtractCustomIcon(RemoteName: PAnsiChar; ExtractFlags: Integer; var TheIcon: HIcon): Integer; stdcall;
 begin
   Result := 0;
@@ -823,7 +828,7 @@ begin
   end;
 
   ofn := OnlyFileName(RemoteName);
-  url := CompletePath(RemoteName);
+  url := CompletePath(Plugin.CurrentPath, RemoteName);
   if Name = '\' + Strings[0] then
   begin
     TheIcon := LoadIcon(HInstance, 'ZCONNECT');
@@ -839,58 +844,27 @@ begin
     TheIcon := LoadIcon(HInstance, 'ZLANG');
     Result  := FS_ICON_EXTRACTED;
   end
-  else if (ofn = Strings[2]) or (BookMark.BMList.IndexOf(ofn) > -1) then
+  else if (ofn = Strings[2]) or (Plugin.BookMark.BMList.IndexOf(ofn) > -1) then
   begin
     TheIcon := LoadIcon(HInstance, 'ZBOOK');
     Result  := FS_ICON_EXTRACTED;
   end
-  else if (ofn <> '') and IsWebPage(url) then
+  else if (ofn <> '') and IsWebPage(url,Plugin.Links) then
   begin
     TheIcon := LoadIcon(HInstance, 'ZLINK');
     Result  := FS_ICON_EXTRACTED;
   end;
 end;
 
-// ______________________________________________________________________________
 procedure DLLEntryPoint(dwReason: DWORD);
 begin
-  if dwReason = DLL_PROCESS_ATTACH then
-  begin
-    ProgressObject      := TProgress.Create;
-    HttpCli             := THTTPClient.Create;
-    FileList            := TStringList.Create;
-    FileList.Sorted     := True;
-    FileList.Duplicates := dupIgnore;
-    PathExe             := ExtractFilePath(GetDllPathName);
-    ini                 := TIni.Create(PathExe + 'httpbrowser.ini');
-    Strings             := TLines.Create;
-    Strings.SetLanguage(PathExe + ini.GetS('Language') + '.lng');
-    GetSizeExtensions := ' ' + LowerCase(ini.GetS('GetSizeExtensions', '')) + ' ';
-    links             := LowerCase(' ' + ini.GetS('LinksExtensions', '.php .htm .html .shtm .shtml .php3 .php4 .php5 .cfm .asp .jsp .swf .jhtm .jhtml .phtml .phtm .chtml .chtml .adp .dml .xml .xhtml .xhtm .xiti') + ' ');
-    BookMark          := TBookMark.Create;
-    History           := THistory.Create;
-    // HttpReq.ProxySettings.Host := ini.GetS('Proxy');
-    // HttpCli.ProxySettings.Port := ini.GetS('ProxyPort', '80');
-    // HttpCli.ProxySettings.UserName := ini.GetS('ProxyLogin');
-    // HttpCli.ProxySettings.Password := ini.GetS('ProxyPassword');
-    // HttpCli.OnHeaderEnd   := ProgressObject.HeaderEnd;
-  end
-  else if dwReason = DLL_PROCESS_DETACH then
-  begin
-    try
-      FreeAndNil(FileList);
-      FreeAndNil(ini);
-      FreeAndNil(HttpCli);
-      FreeAndNil(ProgressObject);
-      FreeAndNil(BookMark);
-      FreeAndNil(Strings);
-      FreeAndNil(History);
-    except
-    end;
+  case dwReason of
+    DLL_PROCESS_ATTACH : Plugin := TPlugin.Create;
+    DLL_PROCESS_DETACH : FreeAndNil(Plugin);
   end;
 end;
 
-// ______________________________________________________________________________
+
 
 exports
   FsInit, FsInitW,
