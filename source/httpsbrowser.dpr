@@ -1,4 +1,4 @@
-library httpbrowser;
+library httpsbrowser;
 
 {$DEFINE NOFORMS}
 
