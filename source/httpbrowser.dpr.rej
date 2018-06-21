@@ -1,0 +1,10 @@
+diff a/source/httpbrowser.dpr b/source/httpbrowser.dpr	(rejected hunks)
+@@ -314,8 +314,6 @@
+   i := 1;
+ 
+   // Suppression des espaces avant et apr�s "="
+-  while (i < l) and (Text[i] = ' ') do Inc(i);
+-  if (i >= l) or (Text[i] <> '=') then Exit;
+   while (i < l) and (Text[i] = ' ') do
+     Inc(i);
+   if (i >= l) or (Text[i] <> '=') then
