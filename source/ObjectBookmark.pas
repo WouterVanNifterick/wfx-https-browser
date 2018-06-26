@@ -2,19 +2,21 @@ unit ObjectBookmark;
 
 interface
 
-uses Classes, UnitStrings, SysUtils;
+uses Classes, WfxPlugin, SysUtils;
 
 {$DEFINE NOFORMS}
 
-type TBookmark = class(TObject)
-    BMList : TStringList;
-    procedure Add(URL : string);
-    procedure Delete(URL : string);
-    constructor Create;
+type
+  TBookmark = class(TObject)
+    BMList: TStringList;
+    Plugin:TWfxPlugin;
+    procedure Add(URL: string);
+    procedure Delete(URL: string);
+    constructor Create(APlugin:TWFXPlugin);
     destructor Destroy; override;
   private
     procedure Save;
-end;
+  end;
 
 implementation
 
@@ -24,40 +26,43 @@ uses ObjectLines, ObjectIni;
 
 procedure TBookmark.Add(URL: string);
 begin
-  if URL = '' then Exit;
-  URL := Replace(URL, ';', '%3B');
+  if URL = '' then
+    Exit;
+
+  URL := URL.Replace(';', '%3B');
   BMList.Add(URL);
 
-  TCShowMessage(Strings[2], Format(Strings[5], [URL]));
-//  MessageDlg(Format(Strings[5], [URL]), mtInformation, [mbOK], 0);
+  Plugin.TCShowMessage(Plugin.Strings[2], Format(Plugin.Strings[5], [URL]));
+  // MessageDlg(Format(Strings[5], [URL]), mtInformation, [mbOK], 0);
   Save;
 end;
 
 procedure TBookmark.Save;
 var
-  s : string;
+  s: string;
 begin
-  s := merge(BMList);
-  Ini.SetValue('Bookmark', s);
+  s := BMList.DelimitedText;
+  Plugin.Ini.SetValue('Bookmark', s);
 end;
 
-constructor TBookmark.Create;
-var
-  s : string;
+constructor TBookmark.Create(APlugin:TWFXPlugin);
 begin
-  BMList := TStringList.Create;
-  BMList.Sorted := True;
+  Plugin            := APlugin;
+  BMList            := TStringList.Create;
+  BMList.Sorted     := True;
   BMList.Duplicates := dupIgnore;
-  s := Ini.GetS('Bookmark');
-  if s <> '' then split(BMList, s);
+  BMList.Delimiter  := ';';
+  BMList.DelimitedText := Plugin.Ini.GetS('Bookmark');
 end;
 
 procedure TBookmark.Delete(URL: string);
 var
-  i : Integer;
+  i: Integer;
 begin
   i := BMList.IndexOf(URL);
-  if i > -1 then BMList.Delete(i);
+  if i > -1 then
+    BMList.Delete(i);
+
   Save;
 end;
 

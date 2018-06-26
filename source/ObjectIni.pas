@@ -8,18 +8,18 @@ uses Classes;
 
 type
   TIni = Class(TStringList)
-    constructor Create(Path : string = '');
-    function GetB(Name : string; DefaultValue : Boolean = False) : Boolean; overload;
-    function GetS(Name : string; DefaultValue : string = '') : string;  overload;
-    function GetI(Name : string; DefaultValue : Integer = 0) : Integer; overload;
-    function GetF(Name : string; DefaultValue : Double = 0.0) : Double;  overload;
+    constructor Create(Path: string = '');
+    function GetB(Name: string; DefaultValue: Boolean = False): Boolean; overload;
+    function GetS(Name: string; DefaultValue: string = ''): string; overload;
+    function GetI(Name: string; DefaultValue: Integer = 0): Integer; overload;
+    function GetF(Name: string; DefaultValue: Double = 0.0): Double; overload;
   public
-    procedure SetValue(Name : string; Value : Boolean); overload;
-    procedure SetValue(Name : string; Value : string); overload;
-    procedure SetValue(Name : string; Value : Integer); overload;
-    procedure SetValue(Name : string; Value : Double); overload;
+    procedure SetValue(Name: string; Value: Boolean); overload;
+    procedure SetValue(Name: string; Value: string); overload;
+    procedure SetValue(Name: string; Value: Integer); overload;
+    procedure SetValue(Name: string; Value: Double); overload;
   private
-    IniFilePath : string;
+    IniFilePath: string;
     procedure Load;
     procedure Save;
   end;
@@ -34,18 +34,21 @@ begin
   IniFilePath := Path;
   Load;
 end;
-//______________________________________________________________________________
-function TIni.GetB(Name: string; DefaultValue : Boolean = False): Boolean;
+
+// ______________________________________________________________________________
+function TIni.GetB(Name: string; DefaultValue: Boolean = False): Boolean;
 var
-  s : string;
+  s: string;
 begin
   s := Values[Name];
-  if s = '' then Result := DefaultValue
-  else Result := (LowerCase(s) = 'true') or (s = '1');
-  
+  if s = '' then
+    Result := DefaultValue
+  else
+    Result := (LowerCase(s) = 'true') or (s = '1');
 end;
-//______________________________________________________________________________
-function TIni.GetF(Name: string; DefaultValue : Double = 0.0): Double;
+
+// ______________________________________________________________________________
+function TIni.GetF(Name: string; DefaultValue: Double = 0.0): Double;
 begin
   try
     Result := StrToFloat(Values[Name]);
@@ -53,8 +56,9 @@ begin
     Result := DefaultValue;
   end;
 end;
-//______________________________________________________________________________
-function TIni.GetI(Name: string; DefaultValue : Integer = 0): Integer;
+
+// ______________________________________________________________________________
+function TIni.GetI(Name: string; DefaultValue: Integer = 0): Integer;
 begin
   try
     Result := StrToInt(Values[Name]);
@@ -62,42 +66,53 @@ begin
     Result := DefaultValue;
   end;
 end;
-//______________________________________________________________________________
-function TIni.GetS(Name: string; DefaultValue : string = ''): string;
+
+// ______________________________________________________________________________
+function TIni.GetS(Name: string; DefaultValue: string = ''): string;
 begin
   Result := Values[Name];
-  if Result = '' then Result := DefaultValue;
+  if Result = '' then
+    Result := DefaultValue;
 end;
-//______________________________________________________________________________
+
+// ______________________________________________________________________________
 procedure TIni.Load;
 begin
-  if FileExists(IniFilePath) then LoadFromFile(IniFilePath);
+  if FileExists(IniFilePath) then
+    LoadFromFile(IniFilePath);
 end;
-//______________________________________________________________________________
+
+// ______________________________________________________________________________
 procedure TIni.Save;
 begin
   SaveToFile(IniFilePath);
 end;
-//______________________________________________________________________________
+
+// ______________________________________________________________________________
 procedure TIni.SetValue(Name: string; Value: Boolean);
 begin
-  if Value then Values[Name] := 'True'
-  else Values[Name] := 'False';
+  if Value then
+    Values[Name] := 'True'
+  else
+    Values[Name] := 'False';
   Save;
 end;
-//______________________________________________________________________________
+
+// ______________________________________________________________________________
 procedure TIni.SetValue(Name: string; Value: Integer);
 begin
   Values[Name] := format('%d', [Value]);
   Save;
 end;
-//______________________________________________________________________________
+
+// ______________________________________________________________________________
 procedure TIni.SetValue(Name, Value: string);
 begin
   Values[Name] := Value;
   Save;
 end;
-//______________________________________________________________________________
+
+// ______________________________________________________________________________
 procedure TIni.SetValue(Name: string; Value: Double);
 begin
   Values[Name] := format('%f', [Value]);

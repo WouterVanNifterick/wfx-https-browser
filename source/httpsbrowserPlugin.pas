@@ -1,4 +1,4 @@
-unit httpsbrowserPlugin;
+unit HttpsbrowserPlugin;
 
 interface
 
@@ -9,57 +9,49 @@ uses
   WinApi.ShellApi,
   System.AnsiStrings,
   System.Net.HttpClient,
+  WfxPlugin,
   ObjectIni,
   ObjectLines,
   UnitStrings,
   ObjectBookmark,
-  ObjectTimer,
+
   ObjectHistory;
 
 
 type
-  TWFXPlugin = class
-
-  end;
-
   THTTPSBrowserPlugin = class(TWFXPlugin)
-    HttpCli: THTTPClient;
-    HttpRes: IHTTPResponse;
-
-    PreviousPath: string;
-    CurrentPath : string;
-    FLIndex     : Integer;
-    PathExe     : string;
-
-    LocalFile: string;
-    RemoteFile: string;
-
+  public
+    HttpCli          : THTTPClient;
+    HttpRes          : IHTTPResponse;
     Received         : Int64;
-    FileDate         : _FILETIME;
     links            : string;
-    FileList         : TStringList;
-
     GetSizeExtensions: string;
     BookMark         : TBookMark;
     History          : THistory;
     LastPage         : string;
-    // IsGettingFile    : Boolean;
-    AbortCopy       : Boolean;
-    GetFileNow      : string;
-    Parsed          : Boolean;
-    OriginalLastPage: string;
-    constructor Create;
-    destructor Destroy;override;
+    AbortCopy        : Boolean;
+    URL              : string;
+    Parsed           : Boolean;
+    OriginalLastPage : string;
+  public
+    constructor Create; override;
+    destructor Destroy; override;
     procedure Init;
-    function GetFileSize(url: string): Integer;
-    function GetPage(var url: string): string;
-    procedure GetBinaryFile(const url, FileName: string);
-    procedure ParsePage(var sl: TStringList; url: string);
+    function GetFileSize(URL: string): Integer;
+    function GetPage(var URL: string): string;
+    procedure GetBinaryFile(const URL, FileName: string);
+    procedure ParsePage(var sl: TStringList; URL: string);
     procedure BuildFindData(var FD: TWin32FindData; FileName: string);
     procedure PageList(var sl: TStringList);
     procedure RootList(var sl: TStringList);
     procedure LangList(var sl: TStringList);
     procedure CreateFileList;
+    procedure GoBack(RemoteName: PWideChar);
+    procedure Connect(RemoteName: PWideChar);
+    function LoadFromWeb(Name: string; RemoteName: PWideChar): Integer;
+    procedure Download;
+    function ExecuteFile(MainWin: THandle; RemoteName, Verb: PWideChar): Integer; override;
+    function FindFirstFile(var FindData: _WIN32_FIND_DATAW; Path: PWideChar): Cardinal; override;
   end;
 
 function IsWebPage(url:string; const links: string): Boolean;
@@ -120,7 +112,7 @@ begin
   folders   := TrimSlashes(folders);
 end;
 
-function GetURLRoot(url: string): string;
+function GetURLRoot(const url: string): string;
 var
   d, f, p: string;
 begin
@@ -183,7 +175,7 @@ begin
       Result := f + '.htm'
     else
     begin
-      d      := Replace(d, '.', '_');
+      d      := d.Replace('.', '_');
       Result := d + '.htm';
     end;
   end
@@ -193,8 +185,8 @@ begin
   end;
   if Pos('http://', Result) = 1 then
     Delete(Result, 1, 7);
-  Result := Replace(Result, '/', '_');
-  Result := Replace(Result, '?', '_');
+  Result := Result.Replace('/', '_');
+  Result := Result.Replace('?', '_');
 end;
 
 function MakeRelative(CompleteText, root: string): string;
@@ -212,7 +204,8 @@ begin
   if line = '' then
     Exit(False);
 
-  ll     := LowerCase(line);
+  ll := LowerCase(line);
+
   Result := (ll <> '/')
         and (Pos('mailto', ll) <> 1)
         and (Pos('javascript', ll) <> 1)
@@ -285,11 +278,15 @@ begin
   // suppress spaces before and after "="
   while (i < l) and (Text[i] = ' ') do
     Inc(i);
+
   if (i >= l) or (Text[i] <> '=') then
     Exit;
+
   Inc(i);
+
   while (i < l) and (Text[i] = ' ') do
     Inc(i);
+
   if i >= l then
     Exit;
 
@@ -310,8 +307,9 @@ begin
     i := Pos(' ', Text);
     if i = 0 then
       i := j
-    else if (j <> 0) and (j < i) then
-      i := j;
+    else
+      if (j <> 0) and (j < i) then
+        i := j;
   end
   // Mot entouré de séparateurs
   else
@@ -328,26 +326,45 @@ begin
 
   ResultStr := Copy(Text, 1, i - 1 - Code);
 
-  Delete(Text, 1, i);
-  Delete(LText, 1, i);
-  ResultStr := Replace(ResultStr, #13, '');
-  ResultStr := Replace(ResultStr, #10, '');
+  System.Delete(Text, 1, i);
+  System.Delete(LText, 1, i);
+  ResultStr := ResultStr
+                 .Replace(#13, '')
+                 .Replace(#10, '');
+end;
+
+procedure THTTPSBrowserPlugin.Connect(RemoteName: PWideChar);
+var LocalURL: string;
+begin
+  // Connect
+  FileList.Clear;
+  LocalURL := ini.GetS('LastURL', 'http://www.google.com');
+  if Input('', '', LocalURL, RT_URL) then
+  begin
+    ini.SetValue('LastURL', LocalURL);
+    if not IsWebPage(LocalURL, links) then
+    begin
+      URL := LocalURL;
+      StrPCopy(RemoteName, '\');
+      Exit;
+    end;
+    History.Add(LocalURL);
+    LastPage := GetPage(LocalURL);
+    Parsed := True;
+    StrPCopy(RemoteName, '\' + LocalURL);
+    CurrentPath := RemoteName;
+  end
+  else
+    StrPCopy(RemoteName, '\');
 end;
 
 constructor THTTPSBrowserPlugin.Create;
 begin
   inherited;
   HttpCli             := THTTPClient.Create;
-  FileList            := TStringList.Create;
-  FileList.Sorted     := True;
-  FileList.Duplicates := dupIgnore;
-  PathExe             := ExtractFilePath(GetDllPathName);
-  ini                 := TIni.Create(PathExe + 'httpbrowser.ini');
-  Strings             := TLines.Create;
-  Strings.SetLanguage(PathExe + ini.GetS('Language') + '.lng');
   GetSizeExtensions := ' ' + LowerCase(ini.GetS('GetSizeExtensions', '')) + ' ';
   links             := LowerCase(' ' + ini.GetS('LinksExtensions', '.php .htm .html .shtm .shtml .php3 .php4 .php5 .cfm .asp .jsp .swf .jhtm .jhtml .phtml .phtm .chtml .chtml .adp .dml .xml .xhtml .xhtm .xiti') + ' ');
-  BookMark          := TBookMark.Create;
+  BookMark          := TBookMark.Create(Self);
   History           := THistory.Create;
   // HttpReq.ProxySettings.Host := ini.GetS('Proxy');
   // HttpCli.ProxySettings.Port := ini.GetS('ProxyPort', '80');
@@ -367,11 +384,117 @@ begin
   inherited;
 end;
 
+procedure THTTPSBrowserPlugin.Download;
+var
+  ofn: string;
+begin
+  if URL <> '' then
+  begin
+    try
+      ofn := PathExe + CreateFileName(URL);
+      RemoteFile := URL;
+      LocalFile := ofn;
+      GetBinaryFile(URL, ofn);
+      if not AbortCopy then
+        ShellExecute(HInstance, 'Open', PChar(ofn), PChar(''), PChar(''), SW_SHOWNORMAL);
+      AbortCopy := False;
+    finally
+      URL := '';
+    end;
+  end;
+end;
+
+function THTTPSBrowserPlugin.ExecuteFile(MainWin: THandle; RemoteName,
+  Verb: PWideChar): Integer;
+var
+  Name     : string;
+  FileName : string;
+  vb       : string;
+begin
+  try
+    // @@@    if IsGettingFile then
+    // begin
+    // Result := FS_EXEC_OK;
+    // Exit;
+    // end;
+
+    Name   := RemoteName;
+    Result := FS_EXEC_SYMLINK;
+
+    vb := Verb;
+    if vb.StartsWith('quote') then
+      Exit;
+
+    if Name = '\...' then
+    begin
+      GoBack(RemoteName);
+      Exit;
+    end;
+
+    Delete(Name, 1, 1);
+
+    if Name = Strings[0] then
+    begin
+      Connect(RemoteName);
+      Exit;
+    end;
+
+    if Name = '' then
+      Exit(FS_EXEC_OK);
+
+    FileName := OnlyFileName(RemoteName);
+    Name     := CompletePath(CurrentPath, RemoteName);
+
+    if FileName = Strings[2] then // Bookmark
+    begin
+      BookMark.Add(CurrentPath);
+      Result := FS_EXEC_OK;
+    end
+    else
+      if FileName = Strings[6] then // Language
+        StrPCopy(RemoteName, '\' + Strings[6])
+      else
+        if RemoteName = '\' + Strings[6] + '\' + FileName then // language 2
+        begin
+          ini.SetValue('Language', FileName);
+          Strings.SetLanguage(PathExe + FileName + '.lng');
+          StrPCopy(RemoteName, '\');
+        end
+        else
+          Exit(LoadFromWeb(Name, RemoteName));
+  except
+    on E: Exception do
+    begin
+      Result := FS_EXEC_ERROR;
+      TCShowMessage('', E.Message);
+    end;
+  end;
+end;
+
+function THTTPSBrowserPlugin.FindFirstFile(var FindData: _WIN32_FIND_DATAW; Path: PWideChar):Cardinal;
+begin
+  FindData := default(tWIN32FINDDATAW);
+  CurrentPath := Path;
+  if not Parsed then
+    ExecuteFile(0, Path, '');
+  Parsed := False;
+  CreateFileList;
+  if FileList.Count = 0 then
+    Result := INVALID_HANDLE_VALUE
+  else
+  begin
+    Result := 0;
+    FLIndex := 0;
+    BuildFindData(FindData, FileList[0]);
+  end;
+  Download;
+end;
+
 procedure THTTPSBrowserPlugin.Init;
 begin
   PreviousPath := '';
   FileDate     := DateTimeToFileTime(Now);
-  GetFileNow   := '';
+  URL   := '';
 end;
 
 function THTTPSBrowserPlugin.GetFileSize(url: string): Integer;
@@ -395,6 +518,16 @@ begin
 end;
 
 
+procedure THTTPSBrowserPlugin.GoBack(RemoteName: PWideChar);
+var s:string;
+begin
+  s := History.GoBack;
+  StrPCopy(RemoteName, s);
+  Delete(s, 1, 1);
+  LastPage := GetPage(s);
+  Parsed := True;
+end;
+
 procedure THTTPSBrowserPlugin.ParsePage(var sl: TStringList; url: string);
 var
   page : string;
@@ -411,6 +544,7 @@ begin
 
   if page = '' then
     Exit;
+
   s  := page;
   ls := LPage;
 
@@ -473,7 +607,7 @@ procedure THTTPSBrowserPlugin.LangList(var sl: TStringList);
 var
   sr: TSearchRec;
 begin
-  if FindFirst(PathExe + 'hb_*.lng', faAnyFile, sr) = 0 then
+  if System.SysUtils.FindFirst(PathExe + 'hb_*.lng', faAnyFile, sr) = 0 then
   begin
     sl.Add(ChangeFileExt(sr.Name, ''));
     while FindNext(sr) = 0 do
@@ -481,6 +615,21 @@ begin
   end;
 end;
 
+
+function THTTPSBrowserPlugin.LoadFromWeb(Name: string; RemoteName: PWideChar): Integer;
+begin
+  if IsWebPage(Name, Links) or IsRoot(Name, RemoteName, Links) then
+  begin
+    // Webpage
+    History.Add(Name);
+    LastPage := GetPage(Name);
+    Parsed := True;
+    StrPCopy(RemoteName, '\' + Name);
+    Result := FS_EXEC_SYMLINK;
+  end
+  else
+    Result := FS_EXEC_YOURSELF;
+end;
 
 procedure THTTPSBrowserPlugin.CreateFileList;
 begin
