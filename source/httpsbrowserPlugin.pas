@@ -37,6 +37,7 @@ type
     constructor Create; override;
     destructor Destroy; override;
     procedure Init;
+
     function GetFileSize(URL: string): Integer;
     function GetPage(var URL: string): string;
     procedure GetBinaryFile(const URL, FileName: string);
@@ -52,14 +53,11 @@ type
     procedure Download;
     function ExecuteFile(MainWin: THandle; RemoteName, Verb: PWideChar): Integer; override;
     function FindFirstFile(var FindData: _WIN32_FIND_DATAW; Path: PWideChar): Cardinal; override;
+    function GetFile(RemoteName,LocalName:string):Integer;
+    function GetIcon(RemoteName:string; var TheIcon:HICON):Integer;
+    function Delete(const RemoteName: string):Boolean; override;
+    function GetPluginName: string; override;
   end;
-
-function IsWebPage(url:string; const links: string): Boolean;
-function OnlyFileName(const RemoteName: string): string;
-function CompletePath(CurrentPath, RemoteName: string): string;
-function IsRoot(var Name: string; const RemoteName: string; const links:string): Boolean;
-function CreateFileName(Path: string): string;
-
 
 implementation
 
@@ -373,6 +371,21 @@ begin
   // HttpCli.OnHeaderEnd   := ProgressObject.HeaderEnd;
 end;
 
+function THTTPSBrowserPlugin.Delete(const RemoteName: string):Boolean;
+var
+  s: string;
+begin
+  inherited;
+  Result := False;
+  if CurrentPath <> '\' then
+    Exit;
+  Result := True;
+  s      := RemoteName;
+  if s <> '' then
+    System.Delete(s, 1, 1);
+  BookMark.Delete(s);
+end;
+
 destructor THTTPSBrowserPlugin.Destroy;
 begin
   FreeAndNil(FileList);
@@ -431,7 +444,7 @@ begin
       Exit;
     end;
 
-    Delete(Name, 1, 1);
+    System.Delete(Name, 1, 1);
 
     if Name = Strings[0] then
     begin
@@ -497,12 +510,117 @@ begin
   URL   := '';
 end;
 
+function THTTPSBrowserPlugin.GetFile(RemoteName, LocalName: string): Integer;
+var
+  i             : Integer;
+  url           : string;
+  Name          : string;
+  LocalPath     : string;
+  RemoteFileName: string;
+  sStream       : TStringStream;
+begin
+  try
+    Name := LocalName;
+
+    // calcule local path
+    RemoteFileName := OnlyFileName(RemoteName);
+    LocalPath      := Name;
+    i              := Length(Name);
+    if RemoteFileName = '...' then
+    begin
+      System.Delete(LocalPath, i - 2, 3);
+      StrPCopy(PChar(LocalName), IncludeTrailingPathDelimiter(LocalPath) + CreateFileName(CurrentPath));
+      StrPCopy(PChar(RemoteName), '\' + CurrentPath);
+
+      sStream := TStringStream.Create(OriginalLastPage);
+      try
+        sStream.SaveToFile(LocalName);
+      finally
+        sStream.Free;
+      end;
+
+      Result := FS_FILE_OK;
+      Exit;
+    end
+    else
+    begin
+      LocalPath := ExtractFileDir(LocalPath);
+    end;
+    url := CompletePath(CurrentPath, RemoteName);
+    Name := IncludeTrailingPathDelimiter(LocalPath) + CreateFileName(url);
+
+    LocalName := Name;
+    RemoteName := url;
+
+    if (CurrentPath = '\') or (CurrentPath = '\' + Strings[6]) then
+    begin
+      Result := FS_FILE_NOTSUPPORTED
+    end
+    else
+    begin
+      RemoteFile := RemoteName;
+      LocalFile  := LocalName;
+      if not AbortCopy then
+        GetBinaryFile(url, PChar(Name));
+      Result := FS_FILE_OK;
+    end;
+  except
+    on E: Exception do
+    begin
+      Result := FS_FILE_READERROR;
+      TCShowMessage('', E.Message);
+    end;
+  end;
+end;
+
 function THTTPSBrowserPlugin.GetFileSize(url: string): Integer;
 begin
   try
     Result := HttpCli.Head(url).ContentLength;
   except
     Result := 0;
+  end;
+end;
+
+function THTTPSBrowserPlugin.GetIcon(RemoteName: string; var TheIcon:HICON): Integer;
+var
+  Name: string;
+  url : string;
+  ofn : string;
+begin
+  Result := FS_ICON_USEDEFAULT;
+  Name   := RemoteName;
+  if Copy(Name, Length(Name) - 3, 4) = '\..\' then
+  begin
+    Exit;
+  end;
+
+  ofn := OnlyFileName(RemoteName);
+  url := CompletePath(CurrentPath, RemoteName);
+  if Name = '\' + Strings[0] then
+  begin
+    TheIcon := LoadIcon(HInstance, 'ZCONNECT');
+    Result  := FS_ICON_EXTRACTED;
+  end
+  else if Pos('\...', Name) > 0 then
+  begin
+    TheIcon := LoadIcon(HInstance, 'ZBACK');
+    Result  := FS_ICON_EXTRACTED;
+  end
+  else if Pos('\' + Strings[6], Name) = 1 then
+  begin
+    TheIcon := LoadIcon(HInstance, 'ZLANG');
+    Result  := FS_ICON_EXTRACTED;
+  end
+  else if (ofn = Strings[2]) or (BookMark.BMList.IndexOf(ofn) > -1) then
+  begin
+    TheIcon := LoadIcon(HInstance, 'ZBOOK');
+    Result  := FS_ICON_EXTRACTED;
+  end
+  else if (ofn <> '') and IsWebPage(url,Links) then
+  begin
+    TheIcon := LoadIcon(HInstance, 'ZLINK');
+    Result  := FS_ICON_EXTRACTED;
   end;
 end;
 
@@ -518,12 +636,17 @@ begin
 end;
 
 
+function THTTPSBrowserPlugin.GetPluginName: string;
+begin
+  Result := 'HTTPS Browser';
+end;
+
 procedure THTTPSBrowserPlugin.GoBack(RemoteName: PWideChar);
 var s:string;
 begin
   s := History.GoBack;
   StrPCopy(RemoteName, s);
-  Delete(s, 1, 1);
+  System.Delete(s, 1, 1);
   LastPage := GetPage(s);
   Parsed := True;
 end;

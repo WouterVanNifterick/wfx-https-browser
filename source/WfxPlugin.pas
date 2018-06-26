@@ -133,8 +133,10 @@ type
     CurrentPath : string;
     constructor Create; virtual;
     class function GetDLLPathName:string;
+    function GetPluginName:string;virtual;abstract;
     function ExecuteFile(MainWin: THandle; RemoteName, Verb: PWideChar): Integer; virtual; abstract;
     function FindFirstFile(var FindData: _WIN32_FIND_DATAW; Path: PWideChar): Cardinal; virtual; abstract;
+    function Delete(const RemoteName:string):Boolean;virtual; abstract;
     procedure TCShowMessage(const Title, Text: string);
     function Input(const Title, Question: string; var Text: string; InputType: Integer = RT_Other): Boolean;
   end;

@@ -5,6 +5,7 @@ library httpsbrowser;
 {$R 'httpsbrowser.res' '..\res\httpsbrowser.rc'}
 
 uses
+  FastMM4,
   System.SysUtils,
   Vcl.Dialogs,
   System.Classes,
@@ -91,17 +92,8 @@ begin
 end;
 
 function FsDeleteFileW(RemoteName: PWideChar): bool; stdcall;
-var
-  s: string;
 begin
-  Result := False;
-  if Plugin.CurrentPath <> '\' then
-    Exit;
-  Result := True;
-  s      := RemoteName;
-  if s <> '' then
-    Delete(s, 1, 1);
-  Plugin.BookMark.Delete(s);
+  Result := Plugin.Delete(RemoteName);
 end;
 
 function FsGetFile(RemoteName, LocalName: PAnsiChar; CopyFlags: Integer; RemoteInfo: pRemoteInfo): Integer; stdcall;
@@ -110,86 +102,14 @@ begin
 end;
 
 function FsGetFileW(RemoteName, LocalName: PWideChar; CopyFlags: Integer; RemoteInfo: pRemoteInfo): Integer; stdcall;
-var
-  i             : Integer;
-  url           : string;
-  Name          : string;
-  LocalPath     : string;
-  RemoteFileName: string;
-  sStream       : TStringStream;
 begin
-  try
-    Name := LocalName;
-
-    // calcule local path
-    RemoteFileName := OnlyFileName(RemoteName);
-    LocalPath      := Name;
-    i              := Length(Name);
-    if RemoteFileName = '...' then
-    begin
-      Delete(LocalPath, i - 2, 3);
-      StrPCopy(LocalName, IncludeTrailingPathDelimiter(LocalPath) + CreateFileName(Plugin.CurrentPath));
-      StrPCopy(RemoteName, '\' + Plugin.CurrentPath);
-
-      sStream := TStringStream.Create(Plugin.OriginalLastPage);
-      try
-        sStream.SaveToFile(LocalName);
-      finally
-        sStream.Free;
-      end;
-
-      Result := FS_FILE_OK;
-      Exit;
-    end
-    else
-    begin
-      {
-        if AnsiPos(LocalPath, RemoteFileName) > 0 then
-        begin
-        Delete( LocalPath, i - Length(RemoteFileName) , i );
-        url := CompletePath(RemoteName);
-        Name := LocalPath + '\' + CreateFileName(url);
-        end;
-      }
-      // Delete( LocalPath, i - Length(RemoteFileName) , i );
-      LocalPath := ExtractFileDir(LocalPath);
-    end;
-    // fin path local
-
-    url := CompletePath(Plugin.CurrentPath, RemoteName);
-    // Name := LocalPath + '\' + CreateFileName(url);
-    Name := IncludeTrailingPathDelimiter(LocalPath) + CreateFileName(url);
-
-    StrPCopy(LocalName, Name);
-    StrPCopy(RemoteName, url);
-
-    if (Plugin.CurrentPath = '\') or (Plugin.CurrentPath = '\' + Plugin.Strings[6]) then
-    begin
-      Result := FS_FILE_NOTSUPPORTED
-    end
-    else
-    begin
-      Plugin.RemoteFile := RemoteName;
-      Plugin.LocalFile  := LocalName;
-      if not Plugin.AbortCopy then
-        Plugin.GetBinaryFile(url, PChar(Name));
-      Result := FS_FILE_OK;
-    end;
-  except
-    on E: Exception do
-    begin
-      Result := FS_FILE_READERROR;
-      Plugin.TCShowMessage('', E.Message);
-    end;
-  end;
+  Result := Plugin.GetFile(RemoteName,LocalName)
 end;
-
 
 procedure FsGetDefRootName(DefRootName: PAnsiChar; MaxLen: Integer); stdcall;
 begin
-  System.Ansistrings.StrLCopy(DefRootName, 'HTTPS Browser', MaxLen - 1);
+  System.Ansistrings.StrLCopy(DefRootName, PAnsiChar(AnsiString(Plugin.GetPluginName)), MaxLen - 1);
 end;
-
 
 procedure FsStatusInfo(RemoteDir: PAnsiChar; InfoStartEnd, InfoOperation: Integer); stdcall;
 begin
@@ -199,7 +119,6 @@ procedure FsStatusInfoW(RemoteDir: PWideChar; InfoStartEnd, InfoOperation: Integ
 begin
   if (InfoStartEnd = FS_STATUS_END) and (InfoOperation = FS_STATUS_OP_GET_MULTI) then
     Plugin.AbortCopy := False;
-  // ShowMessageFmt('info op = %d', [InfoOperation]);
 end;
 
 function FsExtractCustomIcon(RemoteName: PAnsiChar; ExtractFlags: Integer; var TheIcon: HIcon): Integer; stdcall;
@@ -208,45 +127,8 @@ begin
 end;
 
 function FsExtractCustomIconW(RemoteName: PWideChar; ExtractFlags: Integer; var TheIcon: HIcon): Integer; stdcall;
-var
-  Name: string;
-  url : string;
-  ofn : string;
 begin
-  Result := FS_ICON_USEDEFAULT;
-  Name   := RemoteName;
-  if Copy(Name, Length(Name) - 3, 4) = '\..\' then
-  begin
-    Exit;
-  end;
-
-  ofn := OnlyFileName(RemoteName);
-  url := CompletePath(Plugin.CurrentPath, RemoteName);
-  if Name = '\' + Plugin.Strings[0] then
-  begin
-    TheIcon := LoadIcon(HInstance, 'ZCONNECT');
-    Result  := FS_ICON_EXTRACTED;
-  end
-  else if Pos('\...', Name) > 0 then
-  begin
-    TheIcon := LoadIcon(HInstance, 'ZBACK');
-    Result  := FS_ICON_EXTRACTED;
-  end
-  else if Pos('\' + Plugin.Strings[6], Name) = 1 then
-  begin
-    TheIcon := LoadIcon(HInstance, 'ZLANG');
-    Result  := FS_ICON_EXTRACTED;
-  end
-  else if (ofn = Plugin.Strings[2]) or (Plugin.BookMark.BMList.IndexOf(ofn) > -1) then
-  begin
-    TheIcon := LoadIcon(HInstance, 'ZBOOK');
-    Result  := FS_ICON_EXTRACTED;
-  end
-  else if (ofn <> '') and IsWebPage(url,Plugin.Links) then
-  begin
-    TheIcon := LoadIcon(HInstance, 'ZLINK');
-    Result  := FS_ICON_EXTRACTED;
-  end;
+  Result := Plugin.GetIcon(RemoteName, TheIcon);
 end;
 
 procedure DLLEntryPoint(dwReason: DWORD);
@@ -256,8 +138,6 @@ begin
     DLL_PROCESS_DETACH : FreeAndNil(Plugin);
   end;
 end;
-
-
 
 exports
   FsInit, FsInitW,
