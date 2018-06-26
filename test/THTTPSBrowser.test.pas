@@ -1,26 +1,27 @@
 unit THTTPSBrowser.test;
 
 interface
+
 uses
+  httpsbrowserPlugin,
   DUnitX.TestFramework;
 
 type
 
   [TestFixture]
-  THttpsBrowserTests = class(TObject) 
+  THttpsBrowserTests = class(TObject)
+  private
+    FPlugin:THTTPSBrowserPlugin;
   public
     [Setup]
     procedure Setup;
     [TearDown]
     procedure TearDown;
-    // Sample Methods
-    // Simple single Test
+
     [Test]
     procedure Test1;
     // Test with TestCase Attribute to supply parameters.
     [Test]
-    [TestCase('TestA','1,2')]
-    [TestCase('TestB','3,4')]
     procedure Test2(const AValue1 : Integer;const AValue2 : Integer);
   end;
 
@@ -28,14 +29,17 @@ implementation
 
 procedure THttpsBrowserTests.Setup;
 begin
+  FPlugin := THTTPSBrowserPlugin.Create;
 end;
 
 procedure THttpsBrowserTests.TearDown;
 begin
+  FPlugin.Free;
 end;
 
 procedure THttpsBrowserTests.Test1;
 begin
+
 end;
 
 procedure THttpsBrowserTests.Test2(const AValue1 : Integer;const AValue2 : Integer);
