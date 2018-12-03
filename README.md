@@ -1,4 +1,4 @@
-# wfx-https-browser
+# WFX HTTPS Browser
 HTTPS file system plugin for Total Commander (64-bit version)
 
 Initial developer and sources: [Fabio Chelly](fabio@chelly.net).
