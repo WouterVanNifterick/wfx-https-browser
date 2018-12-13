@@ -1,6 +1,6 @@
 [plugininstall]
 description=HTTPS Browser. Allows to connect to websites via TC and see links, pictures or any downloadable links as files.
 type=wfx
-file=httpsbrowser.wfx64
+file=httpsbrowser.wfx
 defaultdir=HTTPSBrowser
 version=1.1
