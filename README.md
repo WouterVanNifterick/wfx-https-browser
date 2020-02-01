@@ -1,7 +1,7 @@
 # WFX HTTPS Browser
 HTTPS file system plugin for Total Commander (64-bit version)
 
-Initial developer and sources: [Fabio Chelly](fabio@chelly.net).
+Initial developer and sources: [Fabio Chelly](mailto:fabio@chelly.net).
 HTTPS support: [Wouter van Nifterick](https://github.com/WouterVanNifterick)
 
 HTTPS Browser is a plugin for Total Commander. It allows users to connect to websites via Total Commander and see links, pictures or any downloadable links as files. The plugin supports both HTTP and HTTPS protocols.
