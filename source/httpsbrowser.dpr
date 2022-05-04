@@ -5,7 +5,7 @@ library httpsbrowser;
 {$R 'httpsbrowser.res' '..\res\httpsbrowser.rc'}
 
 uses
-  FastMM4,
+{  FastMM4,}
   System.SysUtils,
   Vcl.Dialogs,
   System.Classes,
